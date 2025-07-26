@@ -15,6 +15,10 @@ def get_state_manager():
 
 app = FastAPI()
 
+@app.get("/ping")
+def ping():
+    return {"status": "ok"}
+
 @app.get("/api/drivers", response_model=List[Driver])
 async def get_drivers(state_manager = Depends(get_state_manager)):
     """
