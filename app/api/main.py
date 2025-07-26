@@ -1,5 +1,6 @@
 import json
 from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from app.utils.helpers import DateTimeEncoder
 from typing import List
 from datetime import datetime, timezone
