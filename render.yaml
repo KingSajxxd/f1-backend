@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: f1-backend
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python main.py"
+    envVars:
+      - key: MODE
+        value: "REPLAY"  # or "LIVE"
+      - key: REPLAY_FILE_PATH
+        # Path to your data file on Render
+        value: "data/monaco-race-data.jsonl" 
