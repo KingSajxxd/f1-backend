@@ -1,5 +1,9 @@
 from app.utils.helpers import deep_merge
 import json
+import logging # Import logging module
+
+# Configure logging (optional, but good practice for persistent logs)
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class StateManager:
     """
@@ -31,22 +35,24 @@ class StateManager:
         """
         Main method to update state based on the feed type.
         """
-        try:
+        try: # Keep the try block
             # --- Pattern 1: Deep Merging Feeds ---
             if feed_name in ["TimingData", "TimingAppData", "TimingStats", "TopThree", "DriverList"]:
                 if isinstance(new_data, dict):
-                    # Use the corrected deep_merge from helpers
                     self.state[feed_name] = deep_merge(self.state.get(feed_name, {}), new_data)
-                # Optional: You could log a warning here if the payload is not a dict
             
-            # --- Pattern 2: Append-Only Feeds ---
-            elif feed_name in ["RaceControlMessages", "TeamRadio"]:
-                key = "Messages" if feed_name == "RaceControlMessages" else "Captures"
+            # --- Pattern 2: Specific handling for RaceControlMessages (replace) and TeamRadio (append) ---
+            elif feed_name == "RaceControlMessages":
+                key = "Messages"
                 if isinstance(new_data, dict) and key in new_data:
-                    # Extend the list with new items from the payload
+                    self.state[feed_name] = new_data[key]
+                else:
+                    self.state[feed_name].append(new_data)
+            elif feed_name == "TeamRadio":
+                key = "Captures"
+                if isinstance(new_data, dict) and key in new_data:
                     self.state[feed_name].extend(new_data[key])
                 else:
-                    # If it's a single update, just append it
                     self.state[feed_name].append(new_data)
 
             # --- Pattern 3: Simple Replacement Feeds ---
@@ -54,10 +60,11 @@ class StateManager:
                 self.state[feed_name] = new_data
         
         except Exception as e:
-            # Silently catch potential errors during state updates to prevent crashes.
-            # For production, you would want to log this error to a file.
-            # print(f"Error updating state for feed '{feed_name}': {e}")
-            pass
+            # MODIFIED: Print the error to console for debugging
+            print(f"ERROR: Failed to update state for feed '{feed_name}'. Data: {new_data}. Error: {e}")
+            # Consider using logging.error for production logs with traceback:
+            # logging.error(f"Failed to update state for feed '{feed_name}'. Data: {new_data}", exc_info=True)
+
 
     def get_full_state(self):
         """Returns the entire current state."""
