@@ -45,6 +45,10 @@ class F1StreamProcessor:
     F1_BASE_URL = "livetiming.formula1.com/signalr"
     SIGNALR_HUB = '[{"name":"Streaming"}]'
 
+    # Auto-reconnect configuration
+    MAX_RETRY_DELAY = 600  # Max delay between retries in seconds (e.g., 10 minutes)
+    INITIAL_RETRY_DELAY = 5 # Initial delay in seconds
+
     def __init__(self, state_manager):
         self.state_manager = state_manager
         self.session = None
@@ -52,40 +56,54 @@ class F1StreamProcessor:
 
     async def connect_and_process_live(self):
         """
-        Establishes a LIVE connection to the F1 SignalR feed.
+        Establishes a LIVE connection to the F1 SignalR feed with auto-reconnect logic.
         """
-        print("Connecting to F1 feed...")
-        hub_encoded = urllib.parse.quote(self.SIGNALR_HUB)
-        headers = {"User-Agent": "Mozilla/5.0", "Origin": "https://www.formula1.com"}
+        retry_delay = self.INITIAL_RETRY_DELAY
+        while True: # Keep attempting to connect indefinitely
+            try:
+                print(f"Connecting to F1 feed. Next attempt in {retry_delay} seconds if failed...")
+                hub_encoded = urllib.parse.quote(self.SIGNALR_HUB)
+                headers = {"User-Agent": "Mozilla/5.0", "Origin": "https://www.formula1.com"}
 
-        try:
-            self.session = aiohttp.ClientSession()
+                # Ensure session is closed before creating a new one for a retry attempt
+                if self.session and not self.session.closed:
+                    await self.session.close()
+                self.session = aiohttp.ClientSession()
 
-            # Step 1: Negotiate
-            negotiate_url = f"https://{self.F1_BASE_URL}/negotiate?clientProtocol=1.5&connectionData={hub_encoded}"
-            async with self.session.get(negotiate_url, headers=headers) as resp:
-                data = await resp.json()
-                token = data.get("ConnectionToken")
-                if not token:
-                    print("Failed to get connection token.")
-                    return
+                # Step 1: Negotiate
+                negotiate_url = f"https://{self.F1_BASE_URL}/negotiate?clientProtocol=1.5&connectionData={hub_encoded}"
+                async with self.session.get(negotiate_url, headers=headers) as resp:
+                    resp.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
+                    data = await resp.json()
+                    token = data.get("ConnectionToken")
+                    if not token:
+                        raise ConnectionError("Failed to get connection token during negotiation.")
 
-            # Step 2: WebSocket Connection
-            ws_url = (
-                f"wss://{self.F1_BASE_URL}/connect?clientProtocol=1.5&transport=webSockets&"
-                f"connectionToken={urllib.parse.quote(token)}&connectionData={hub_encoded}"
-            )
-            
-            async with self.session.ws_connect(ws_url, headers=headers, max_msg_size=0) as ws:
-                print("Successfully connected to F1 WebSocket.")
-                await self._subscribe(ws)
-                await self._listen(ws)
+                # Step 2: WebSocket Connection
+                ws_url = (
+                    f"wss://{self.F1_BASE_URL}/connect?clientProtocol=1.5&transport=webSockets&"
+                    f"connectionToken={urllib.parse.quote(token)}&connectionData={hub_encoded}"
+                )
 
-        except Exception as e:
-            print(f"Error connecting to F1 feed: {e}")
-        finally:
-            if self.session and not self.session.closed:
-                await self.session.close()
+                async with self.session.ws_connect(ws_url, headers=headers, max_msg_size=0) as ws:
+                    print("Successfully connected to F1 WebSocket. Listening for data...")
+                    retry_delay = self.INITIAL_RETRY_DELAY # Reset delay on successful connection
+                    await self._subscribe(ws)
+                    await self._listen(ws) # This will block until the WebSocket closes or errors
+
+                print("WebSocket connection closed gracefully. Attempting to reconnect.")
+
+            except (aiohttp.ClientError, ConnectionError) as e:
+                print(f"Connection or negotiation error: {e}. Retrying in {retry_delay} seconds...")
+            except Exception as e:
+                print(f"An unexpected error occurred: {e}. Retrying in {retry_delay} seconds...")
+            finally:
+                if self.session and not self.session.closed:
+                    await self.session.close()
+                # Wait before retrying
+                await asyncio.sleep(retry_delay)
+                # Exponential backoff
+                retry_delay = min(retry_delay * 2, self.MAX_RETRY_DELAY)
 
     async def replay_from_file(self, filepath="monaco-race-data.jsonl", speed=1.0):
         """

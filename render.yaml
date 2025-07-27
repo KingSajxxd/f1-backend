@@ -7,7 +7,7 @@ services:
     startCommand: "python main.py"
     envVars:
       - key: MODE
-        value: "REPLAY"  # or "LIVE"
+        value: "LIVE"  # Changed to "LIVE" for live data streaming
       - key: REPLAY_FILE_PATH
-        # Path to your data file on Render
-        value: "data/monaco-race-data.jsonl" 
+        # Path to your data file on Render (not used in LIVE mode, but can remain)
+        value: "data/monaco-race-data.jsonl"
