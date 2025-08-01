@@ -29,13 +29,29 @@ class StateManager:
             "DriversInPits": {}
         }
         self.clients = []
+        self._current_session_key = None # NEW: To track the current F1 session
         print("State Manager initialized.")
 
     def update_state(self, feed_name, new_data):
         """
         Main method to update state based on the feed type.
+        Includes logic to reset session-specific data on new F1 session.
         """
-        try: # Keep the try block
+        try:
+            # NEW: Check for session change if SessionInfo is being updated
+            if feed_name == "SessionInfo" and isinstance(new_data, dict):
+                new_session_key = new_data.get("Key")
+                if new_session_key and new_session_key != self._current_session_key:
+                    print(f"INFO: Detected new F1 session (Key: {new_session_key}). Clearing previous session data.")
+                    # Clear session-specific lists
+                    self.state["RaceControlMessages"] = []
+                    self.state["TeamRadio"] = []
+                    self.state["LapHistory"] = []
+                    self.state["PitHistory"] = []
+                    self.state["DriversInPits"] = {} # Clear drivers in pits status
+
+                    self._current_session_key = new_session_key # Update session key
+
             # --- Pattern 1: Deep Merging Feeds ---
             if feed_name in ["TimingData", "TimingAppData", "TimingStats", "TopThree", "DriverList"]:
                 if isinstance(new_data, dict):
