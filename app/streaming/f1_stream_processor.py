@@ -369,13 +369,8 @@ class F1StreamProcessor:
                 timestamp_str = timestamp.isoformat() if timestamp else None
 
                 if feed_name == "TimingData":
-                    # First, update the main state with the new TimingData.
                     self.state_manager.update_state(feed_name, payload)
-                    
-                    # 1. First, get the correct TotalLaps that we've already stored in our state.
                     known_total_laps = self.state_manager.state.get("LapCount", {}).get("TotalLaps", 0)
-
-                    # Next, calculate the true current lap from the driver data.
                     all_drivers_timing = self.state_manager.state.get("TimingData", {}).get("Lines", {})
                     max_laps_completed = 0
                     if all_drivers_timing:
@@ -383,24 +378,15 @@ class F1StreamProcessor:
                             laps = driver_data.get("NumberOfLaps", 0)
                             if laps > max_laps_completed:
                                 max_laps_completed = laps
-                    
-                    # The current lap is the highest completed lap + 1.
                     current_lap = max_laps_completed + 1 if max_laps_completed > 0 else 1
-
-                     # Then we build our own, correct LapCount object and broadcast it
                     correct_lap_data = { "CurrentLap": current_lap, "TotalLaps": known_total_laps }
                     self.state_manager.state["LapCount"] = correct_lap_data
-
-                    # Now, broadcast the complete, corrected LapCount object.
                     await self.state_manager.broadcast({
                         "type": "LapCount",
                         "data": correct_lap_data
                     })
-
-                    # Pass the timestamp to both pit and lap recording functions
                     await self._check_and_record_pits(payload, timestamp)
                     await self._check_and_record_laps(payload, timestamp_str)
-                    
                     await self.state_manager.broadcast({"type": "TimingData", "data": payload})
                 
                 elif feed_name == "SessionInfo":
@@ -408,37 +394,36 @@ class F1StreamProcessor:
                     if circuit_short_name:
                         total_laps = GRAND_PRIX_LAPS.get(circuit_short_name, 0)
                         self.state_manager.state["LapCount"]["TotalLaps"] = total_laps
-                    
                     self.state_manager.update_state(feed_name, payload)
                     await self.state_manager.broadcast({"type": feed_name, "data": payload})
 
-                elif feed_name == "LapCount": # This block handles the buggy "LapCount" message
-                    pass # Intentionally do nothing
+                elif feed_name == "LapCount":
+                    pass 
 
-                # NEW/MODIFIED: Explicitly handle RaceControlMessages and TeamRadio
                 elif feed_name == "RaceControlMessages":
-                    self.state_manager.update_state("RaceControlMessages", payload) # Ensure state is updated correctly
+                    # NEW: Log the incoming payload for debugging
+                    print(f"DEBUG: Received RaceControlMessages payload: {payload}")
+                    self.state_manager.update_state("RaceControlMessages", payload)
                     await self.state_manager.broadcast({
                         "type": "RaceControlMessages",
                         "data": payload
                     })
                 
                 elif feed_name == "TeamRadio":
-                    self.state_manager.update_state("TeamRadio", payload) # ADDED: Update state with the new payload
+                    self.state_manager.update_state("TeamRadio", payload)
                     for capture in payload.get("Captures", []):
                         await self.state_manager.broadcast({
                             "type": "NewTeamRadio",
                             "data": capture
                         })
                 
-                # Existing generic handling for other feeds
                 elif feed_name in ["SessionStatus", "WeatherData", "TimingAppData"]:
                     self.state_manager.update_state(feed_name, payload)
                     await self.state_manager.broadcast({
                         "type": feed_name,
                         "data": payload
                     })
-                else: # Fallback for any other unhandled feeds
+                else:
                     self.state_manager.update_state(feed_name, payload)
 
     def _decode_and_decompress(self, data_to_process):
