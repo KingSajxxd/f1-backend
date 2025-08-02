@@ -40,14 +40,38 @@ class StateManager:
                 # Optional: You could log a warning here if the payload is not a dict
             
             # --- Pattern 2: Append-Only Feeds ---
-            elif feed_name in ["RaceControlMessages", "TeamRadio"]:
-                key = "Messages" if feed_name == "RaceControlMessages" else "Captures"
-                if isinstance(new_data, dict) and key in new_data:
-                    # Extend the list with new items from the payload
-                    self.state[feed_name].extend(new_data[key])
+            elif feed_name == "RaceControlMessages":
+                # Ensure that new messages are always appended, regardless of payload structure.
+                # If new_data is a dict containing 'Messages' (which is typically a list),
+                # extend the existing list with those messages.
+                if isinstance(new_data, dict) and "Messages" in new_data:
+                    if isinstance(new_data["Messages"], list):
+                        self.state[feed_name].extend(new_data["Messages"])
+                    else:
+                        # If 'Messages' key contains a single item, append it
+                        self.state[feed_name].append(new_data["Messages"])
+                # If new_data is directly a list of messages, extend the existing list
+                elif isinstance(new_data, list):
+                    self.state[feed_name].extend(new_data)
+                # If new_data is a single message, append it
                 else:
-                    # If it's a single update, just append it
                     self.state[feed_name].append(new_data)
+            
+            # --- NEW: Pattern for TeamRadio (Append-Only) ---
+            elif feed_name == "TeamRadio":
+                # Ensure new team radio captures are always appended or extended
+                captures_to_add = []
+                if isinstance(new_data, dict) and "Captures" in new_data:
+                    if isinstance(new_data["Captures"], list):
+                        captures_to_add.extend(new_data["Captures"])
+                    else:
+                        captures_to_add.append(new_data["Captures"])
+                elif isinstance(new_data, list):
+                    captures_to_add.extend(new_data)
+                else:
+                    captures_to_add.append(new_data)
+                
+                self.state[feed_name].extend(captures_to_add)
 
             # --- Pattern 3: Simple Replacement Feeds ---
             else:
