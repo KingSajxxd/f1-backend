@@ -305,7 +305,7 @@ class F1StreamProcessor:
                 self.state_manager.add_lap_to_history(lap_record)
 
                 # --- ADD THIS DEBUG PRINT ---
-                # print(f"DEBUG: Recorded Lap {lap_number} for Driver {driver_number}. Data: {lap_record}")
+                print(f"DEBUG: Recorded Lap {lap_number} for Driver {driver_number}. Data: {lap_record}")
 
                 await self.state_manager.broadcast({"type": "NewLap", "data": lap_record})
                 # print(f"\nLap {lap_number} for driver {driver_number} recorded...")
@@ -369,8 +369,14 @@ class F1StreamProcessor:
                 timestamp_str = timestamp.isoformat() if timestamp else None
 
                 if feed_name == "TimingData":
+                    # First, update the main state with the new TimingData.
                     self.state_manager.update_state(feed_name, payload)
+                    
+                    # 1. First, get the correct TotalLaps that we've already stored in our state.
+                    #    This defines the variable and resolves the error.
                     known_total_laps = self.state_manager.state.get("LapCount", {}).get("TotalLaps", 0)
+
+                    # Next, calculate the true current lap from the driver data.
                     all_drivers_timing = self.state_manager.state.get("TimingData", {}).get("Lines", {})
                     max_laps_completed = 0
                     if all_drivers_timing:
@@ -378,53 +384,63 @@ class F1StreamProcessor:
                             laps = driver_data.get("NumberOfLaps", 0)
                             if laps > max_laps_completed:
                                 max_laps_completed = laps
+                    
+                    # The current lap is the highest completed lap + 1.
                     current_lap = max_laps_completed + 1 if max_laps_completed > 0 else 1
+
+                     # Then we build our own, correct LapCount object and broadcast it
                     correct_lap_data = { "CurrentLap": current_lap, "TotalLaps": known_total_laps }
                     self.state_manager.state["LapCount"] = correct_lap_data
+
+                    # Now, broadcast the complete, corrected LapCount object.
                     await self.state_manager.broadcast({
                         "type": "LapCount",
                         "data": correct_lap_data
                     })
+
+                    # Pass the timestamp to both pit and lap recording functions
                     await self._check_and_record_pits(payload, timestamp)
-                    await self._check_and_record_laps(payload, timestamp_str)
+                    await self._check_and_record_laps(payload, timestamp_str) # This was a missing call
+                    
                     await self.state_manager.broadcast({"type": "TimingData", "data": payload})
                 
                 elif feed_name == "SessionInfo":
+                    # This dedicated block for SessionInfo is correct.
                     circuit_short_name = payload.get("Meeting", {}).get("Circuit", {}).get("ShortName")
                     if circuit_short_name:
                         total_laps = GRAND_PRIX_LAPS.get(circuit_short_name, 0)
                         self.state_manager.state["LapCount"]["TotalLaps"] = total_laps
+                    
                     self.state_manager.update_state(feed_name, payload)
                     await self.state_manager.broadcast({"type": feed_name, "data": payload})
 
+                 # --- THIS IS THE ONLY CHANGE ---
+                # This new block catches the buggy "LapCount" message from the live feed
+                # and does absolutely nothing with it. This prevents it from falling
+                # into the 'else' block below and corrupting our state.
                 elif feed_name == "LapCount":
-                    pass 
+                    pass # Intentionally do nothing
 
-                elif feed_name == "RaceControlMessages":
-                    # NEW: Log the incoming payload for debugging
-                    print(f"DEBUG: Received RaceControlMessages payload: {payload}")
-                    self.state_manager.update_state("RaceControlMessages", payload)
-                    await self.state_manager.broadcast({
-                        "type": "RaceControlMessages",
-                        "data": payload
-                    })
-                
-                elif feed_name == "TeamRadio":
-                    self.state_manager.update_state("TeamRadio", payload)
-                    for capture in payload.get("Captures", []):
-                        await self.state_manager.broadcast({
-                            "type": "NewTeamRadio",
-                            "data": capture
-                        })
-                
-                elif feed_name in ["SessionStatus", "WeatherData", "TimingAppData"]:
-                    self.state_manager.update_state(feed_name, payload)
-                    await self.state_manager.broadcast({
-                        "type": feed_name,
-                        "data": payload
-                    })
                 else:
                     self.state_manager.update_state(feed_name, payload)
+                    if feed_name == "RaceControlMessages":
+                        await self.state_manager.broadcast({
+                            "type": "RaceControlMessages",
+                            "data": payload
+                        })
+                    
+                    elif feed_name == "TeamRadio":
+                        for capture in payload.get("Captures", []):
+                            await self.state_manager.broadcast({
+                                "type": "NewTeamRadio",
+                                "data": capture
+                            })
+                    
+                    elif feed_name in ["SessionStatus", "WeatherData", "TimingAppData"]:
+                        await self.state_manager.broadcast({
+                            "type": feed_name,
+                            "data": payload
+                        })
 
     def _decode_and_decompress(self, data_to_process):
         """
