@@ -41,21 +41,37 @@ class StateManager:
             
             # --- Pattern 2: Append-Only Feeds ---
             elif feed_name == "RaceControlMessages":
-                # Ensure that new messages are always appended, regardless of payload structure.
-                # If new_data is a dict containing 'Messages' (which is typically a list),
-                # extend the existing list with those messages.
-                if isinstance(new_data, dict) and "Messages" in new_data:
-                    if isinstance(new_data["Messages"], list):
-                        self.state[feed_name].extend(new_data["Messages"])
+                messages_to_process = []
+                if isinstance(new_data, dict):
+                    if "Messages" in new_data:
+                        # Case 1: new_data is {'Messages': [...]} or {'Messages': {...}}
+                        if isinstance(new_data["Messages"], list):
+                            messages_to_process.extend(new_data["Messages"])
+                        elif isinstance(new_data["Messages"], dict):
+                            # If 'Messages' key contains a dictionary of messages (e.g., indexed by numbers)
+                            messages_to_process.extend(new_data["Messages"].values())
+                        else:
+                            # If 'Messages' key contains a single message (not list/dict)
+                            messages_to_process.append(new_data["Messages"])
                     else:
-                        # If 'Messages' key contains a single item, append it
-                        self.state[feed_name].append(new_data["Messages"])
-                # If new_data is directly a list of messages, extend the existing list
+                        # Case 2: new_data is a dict like {'1': {...}, '2': {...}} (numeric keys directly)
+                        # Assume values are the actual message dictionaries
+                        messages_to_process.extend(new_data.values())
                 elif isinstance(new_data, list):
-                    self.state[feed_name].extend(new_data)
-                # If new_data is a single message, append it
+                    # Case 3: new_data is directly a list of messages
+                    messages_to_process.extend(new_data)
                 else:
-                    self.state[feed_name].append(new_data)
+                    # Case 4: new_data is a single message dictionary
+                    messages_to_process.append(new_data)
+
+                # Append only valid message dictionaries that contain required fields
+                for msg_item in messages_to_process:
+                    if isinstance(msg_item, dict) and \
+                       all(k in msg_item for k in ["Utc", "Category", "Message"]):
+                        self.state[feed_name].append(msg_item)
+                    # Optional: Add logging here for skipped invalid messages for debugging
+                    # else:
+                    #     print(f"DEBUG: Skipping invalid RaceControlMessage format: {msg_item}")
             
             # --- NEW: Pattern for TeamRadio (Append-Only) ---
             elif feed_name == "TeamRadio":
